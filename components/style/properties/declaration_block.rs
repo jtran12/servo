@@ -41,7 +41,7 @@ impl Importance {
 }
 
 /// Overridden declarations are skipped.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Clone)]
 pub struct PropertyDeclarationBlock {
     /// The group of declarations, along with their importance.
     ///
@@ -50,6 +50,14 @@ pub struct PropertyDeclarationBlock {
 
     /// The number of entries in `self.declaration` with `Importance::Important`
     important_count: usize,
+
+    longhands: LonghandIdSet,
+}
+
+impl fmt::Debug for PropertyDeclarationBlock {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.declarations.fmt(f)
+    }
 }
 
 impl PropertyDeclarationBlock {
@@ -58,14 +66,20 @@ impl PropertyDeclarationBlock {
         PropertyDeclarationBlock {
             declarations: Vec::new(),
             important_count: 0,
+            longhands: LonghandIdSet::new(),
         }
     }
 
     /// Create a block with a single declaration
     pub fn with_one(declaration: PropertyDeclaration, importance: Importance) -> Self {
+        let mut longhands = LonghandIdSet::new();
+        if let PropertyDeclarationId::Longhand(id) = declaration.id() {
+            longhands.insert(id);
+        }
         PropertyDeclarationBlock {
             declarations: vec![(declaration, importance)],
             important_count: if importance.important() { 1 } else { 0 },
+            longhands: longhands,
         }
     }
 
@@ -198,26 +212,37 @@ impl PropertyDeclarationBlock {
 
     fn push_common(&mut self, declaration: PropertyDeclaration, importance: Importance,
                    overwrite_more_important: bool) {
-        for slot in &mut *self.declarations {
-            if slot.0.id() == declaration.id() {
-                match (slot.1, importance) {
-                    (Importance::Normal, Importance::Important) => {
-                        self.important_count += 1;
-                    }
-                    (Importance::Important, Importance::Normal) => {
-                        if overwrite_more_important {
-                            self.important_count -= 1;
-                        } else {
-                            return
+        let definitely_new = if let PropertyDeclarationId::Longhand(id) = declaration.id() {
+            !self.longhands.contains(id)
+        } else {
+            false
+        };
+
+        if !definitely_new {
+            for slot in &mut *self.declarations {
+                if slot.0.id() == declaration.id() {
+                    match (slot.1, importance) {
+                        (Importance::Normal, Importance::Important) => {
+                            self.important_count += 1;
                         }
+                        (Importance::Important, Importance::Normal) => {
+                            if overwrite_more_important {
+                                self.important_count -= 1;
+                            } else {
+                                return
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
+                    *slot = (declaration, importance);
+                    return
                 }
-                *slot = (declaration, importance);
-                return
             }
         }
 
+        if let PropertyDeclarationId::Longhand(id) = declaration.id() {
+            self.longhands.insert(id);
+        }
         self.declarations.push((declaration, importance));
         if importance.important() {
             self.important_count += 1;
@@ -253,6 +278,11 @@ impl PropertyDeclarationBlock {
     ///
     /// Returns whether any declaration was actually removed.
     pub fn remove_property(&mut self, property: &PropertyId) -> bool {
+        if let PropertyId::Longhand(id) = *property {
+            if !self.longhands.contains(id) {
+                return false
+            }
+        }
         let important_count = &mut self.important_count;
         let mut removed_at_least_one = false;
         self.declarations.retain(|&(ref declaration, importance)| {
@@ -266,6 +296,10 @@ impl PropertyDeclarationBlock {
             !remove
         });
 
+        if let PropertyId::Longhand(id) = *property {
+            debug_assert!(removed_at_least_one);
+            self.longhands.remove(id);
+        }
         removed_at_least_one
     }
 
