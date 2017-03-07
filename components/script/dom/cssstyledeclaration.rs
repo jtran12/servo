@@ -267,11 +267,11 @@ impl CSSStyleDeclaration {
             // Step 8
             // Step 9
             // We could try to be better I guess?
-            *changed = !declarations.is_empty();
-            for declaration in declarations {
+            *changed = true;
+            declarations.expand(|d| {
                 // TODO(emilio): We could check it changed
-                pdb.set_parsed_declaration(declaration.0, importance);
-            }
+                pdb.set_parsed_declaration(d, importance)
+            });
 
             Ok(())
         })
